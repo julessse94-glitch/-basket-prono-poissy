@@ -1,30 +1,26 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 
-const EQUIPES = [
-  'Senior F',
-  'U18-1',
-  'U18-2',
-  'U15-1',
-  'U15-2',
-  'U13-2',
-  'U11 F',
-  'U9',
-];
+const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1a21qYmdidWt4d212Z3ltaWF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMzY0MzAsImV4cCI6MjA5MjYxMjQzMH0.bZlq84ytBiD7f4K6Ji0Oa9bJfhsRh9r4ErfX1lt2bIk';
+const SUPABASE_URL = 'https://aukmjbgbukxwmvgymiau.supabase.co';
+
+const EQUIPES = ['Senior F', 'U18-1', 'U18-2', 'U15-1', 'U15-2', 'U13-2', 'U11 F', 'U9'];
+
+const emptyForm = {
+  equipe: '',
+  home_team: '',
+  away_team: '',
+  match_date: '',
+  status: 'upcoming',
+  home_score: '',
+  away_score: '',
+};
 
 export default function AdminMatches() {
   const [matches, setMatches] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [editingMatch, setEditingMatch] = useState(null);
-  const [formData, setFormData] = useState({
-    equipe: '',
-    home_team: '',
-    away_team: '',
-    match_date: '',
-    status: 'upcoming',
-    home_score: null,
-    away_score: null,
-  });
+  const [editingId, setEditingId] = useState(null);
+  const [formData, setFormData] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -37,89 +33,132 @@ export default function AdminMatches() {
       .from('matches')
       .select('*')
       .order('match_date', { ascending: false });
-    
     if (data) setMatches(data);
+  };
+
+  const calculerPoints = async (matchId, homeScore, awayScore) => {
+    const actualWinner = homeScore > awayScore ? 'home' : 'away';
+    const realGap = Math.abs(homeScore - awayScore);
+
+    const { data: pronos } = await supabase
+      .from('pronostics')
+      .select('*')
+      .eq('id_match', matchId)
+      .eq('submitted', true);
+
+    if (!pronos || pronos.length === 0) return;
+
+    for (const prono of pronos) {
+      let pts = 0;
+      if (prono.vainqueur === actualWinner) {
+        pts = prono.ecart && Math.abs(prono.ecart - realGap) <= 2 ? 200 : 100;
+      }
+
+      await supabase
+        .from('pronostics')
+        .update({ points_gagnes: pts })
+        .eq('id', prono.id);
+
+      const { data: allPronos } = await supabase
+        .from('pronostics')
+        .select('points_gagnes')
+        .eq('user_id', prono.user_id);
+
+      const total = allPronos.reduce((sum, p) => sum + (p.points_gagnes || 0), 0);
+
+      await supabase
+        .from('profiles')
+        .update({ points: total })
+        .eq('id', prono.user_id);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
-    try {
-      const matchData = {
-        ...formData,
-        home_score: formData.home_score || null,
-        away_score: formData.away_score || null,
-      };
+    const matchData = {
+      equipe: formData.equipe,
+      home_team: formData.home_team,
+      away_team: formData.away_team,
+      match_date: formData.match_date.replace('T', ' '),
+      status: formData.status,
+      home_score: formData.home_score !== '' ? parseInt(formData.home_score) : null,
+      away_score: formData.away_score !== '' ? parseInt(formData.away_score) : null,
+    };
 
-      if (editingMatch) {
-        const { error } = await supabase
-          .from('matches')
-          .update(matchData)
-          .eq('match_id', editingMatch.match_id);
-        
-        if (error) throw error;
-        showToast('Match mis à jour !');
+    try {
+      if (editingId !== null) {
+        const response = await fetch(
+          `${SUPABASE_URL}/rest/v1/matches?id=eq.${parseInt(editingId)}&apikey=${ANON_KEY}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': ANON_KEY,
+              'Authorization': `Bearer ${ANON_KEY}`,
+              'Prefer': 'return=minimal',
+            },
+            body: JSON.stringify(matchData),
+          }
+        );
+
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(err);
+        }
+
+        if (
+          matchData.status === 'finished' &&
+          matchData.home_score !== null &&
+          matchData.away_score !== null
+        ) {
+          await calculerPoints(parseInt(editingId), matchData.home_score, matchData.away_score);
+        }
+
+        showToast('Match mis à jour ! ✅');
       } else {
-        const { error } = await supabase
-          .from('matches')
-          .insert([matchData]);
-        
+        const { error } = await supabase.from('matches').insert([matchData]);
         if (error) throw error;
-        showToast('Match ajouté !');
+        showToast('Match ajouté ! ✅');
       }
 
       resetForm();
       loadMatches();
     } catch (err) {
-      showToast(err.message, 'error');
+      showToast('Erreur : ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteMatch = async (matchId) => {
+  const deleteMatch = async (id) => {
     if (!confirm('Supprimer ce match ?')) return;
-
-    try {
-      const { error } = await supabase
-        .from('matches')
-        .delete()
-        .eq('match_id', matchId);
-      
-      if (error) throw error;
+    const { error } = await supabase.from('matches').delete().eq('id', id);
+    if (error) showToast('Erreur : ' + error.message, 'error');
+    else {
       showToast('Match supprimé');
       loadMatches();
-    } catch (err) {
-      showToast(err.message, 'error');
     }
   };
 
   const editMatch = (match) => {
-    setEditingMatch(match);
+    setEditingId(match.id);
     setFormData({
-      equipe: match.equipe,
-      home_team: match.home_team,
-      away_team: match.away_team,
-      match_date: match.match_date.substring(0, 16),
-      status: match.status,
-      home_score: match.home_score,
-      away_score: match.away_score,
+      equipe: match.equipe || '',
+      home_team: match.home_team || '',
+      away_team: match.away_team || '',
+      match_date: match.match_date ? match.match_date.substring(0, 16) : '',
+      status: match.status || 'upcoming',
+      home_score: match.home_score ?? '',
+      away_score: match.away_score ?? '',
     });
     setShowForm(true);
   };
 
   const resetForm = () => {
-    setFormData({
-      equipe: '',
-      home_team: '',
-      away_team: '',
-      match_date: '',
-      status: 'upcoming',
-      home_score: null,
-      away_score: null,
-    });
-    setEditingMatch(null);
+    setFormData(emptyForm);
+    setEditingId(null);
     setShowForm(false);
   };
 
@@ -128,10 +167,31 @@ export default function AdminMatches() {
     setTimeout(() => setToast(null), 2500);
   };
 
+  const inp = {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#fff',
+    fontSize: 14,
+    fontFamily: "'Syne', sans-serif",
+  };
+
+  const lbl = {
+    display: 'block',
+    fontSize: 11,
+    color: '#aaa',
+    marginBottom: 6,
+    fontFamily: "'DM Mono', monospace",
+    fontWeight: 700,
+  };
+
   return (
     <div style={{ padding: '0 16px 100px' }}>
+
       <button
-        onClick={() => setShowForm(!showForm)}
+        onClick={() => { resetForm(); setShowForm(!showForm); }}
         style={{
           width: '100%',
           padding: '14px',
@@ -153,38 +213,22 @@ export default function AdminMatches() {
         <form
           onSubmit={handleSubmit}
           style={{
-            background: 'rgba(255, 255, 255, 0.05)',
+            background: 'rgba(255,255,255,0.05)',
             borderRadius: 20,
             padding: '20px',
             marginBottom: 20,
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            border: '1px solid rgba(255,255,255,0.1)',
           }}
         >
           <div style={{ marginBottom: 14 }}>
-            <label style={{
-              display: 'block',
-              fontSize: 11,
-              color: '#aaa',
-              marginBottom: 6,
-              fontFamily: "'DM Mono', monospace",
-              fontWeight: 700,
-            }}>ÉQUIPE</label>
+            <label style={lbl}>ÉQUIPE</label>
             <select
               value={formData.equipe}
-              onChange={(e) => setFormData({ ...formData, equipe: e.target.value })}
+              onChange={e => setFormData({ ...formData, equipe: e.target.value })}
               required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
-                fontSize: 14,
-                fontFamily: "'Syne', sans-serif",
-              }}
+              style={inp}
             >
-              <option value="">Choisir</option>
+              <option value="">Choisir une équipe</option>
               {EQUIPES.map(eq => (
                 <option key={eq} value={eq} style={{ background: '#1a0a2e' }}>{eq}</option>
               ))}
@@ -192,110 +236,46 @@ export default function AdminMatches() {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={{
-              display: 'block',
-              fontSize: 11,
-              color: '#aaa',
-              marginBottom: 6,
-              fontFamily: "'DM Mono', monospace",
-              fontWeight: 700,
-            }}>ÉQUIPE DOMICILE (Poissy)</label>
+            <label style={lbl}>ÉQUIPE DOMICILE</label>
             <input
               type="text"
               value={formData.home_team}
-              onChange={(e) => setFormData({ ...formData, home_team: e.target.value })}
+              onChange={e => setFormData({ ...formData, home_team: e.target.value })}
               required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
-                fontSize: 14,
-                fontFamily: "'Syne', sans-serif",
-              }}
-              placeholder="Ex: Poissy U18-1"
+              style={inp}
+              placeholder="Ex: Mon équipe"
             />
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={{
-              display: 'block',
-              fontSize: 11,
-              color: '#aaa',
-              marginBottom: 6,
-              fontFamily: "'DM Mono', monospace",
-              fontWeight: 700,
-            }}>ÉQUIPE EXTÉRIEUR (Adversaire)</label>
+            <label style={lbl}>ÉQUIPE EXTÉRIEUR</label>
             <input
               type="text"
               value={formData.away_team}
-              onChange={(e) => setFormData({ ...formData, away_team: e.target.value })}
+              onChange={e => setFormData({ ...formData, away_team: e.target.value })}
               required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
-                fontSize: 14,
-                fontFamily: "'Syne', sans-serif",
-              }}
-              placeholder="Ex: Versailles BC"
+              style={inp}
+              placeholder="Ex: Equipe adverse"
             />
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={{
-              display: 'block',
-              fontSize: 11,
-              color: '#aaa',
-              marginBottom: 6,
-              fontFamily: "'DM Mono', monospace",
-              fontWeight: 700,
-            }}>DATE ET HEURE DU MATCH</label>
+            <label style={lbl}>DATE ET HEURE</label>
             <input
               type="datetime-local"
               value={formData.match_date}
-              onChange={(e) => setFormData({ ...formData, match_date: e.target.value })}
+              onChange={e => setFormData({ ...formData, match_date: e.target.value })}
               required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
-                fontSize: 14,
-                fontFamily: "'Syne', sans-serif",
-              }}
+              style={inp}
             />
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <label style={{
-              display: 'block',
-              fontSize: 11,
-              color: '#aaa',
-              marginBottom: 6,
-              fontFamily: "'DM Mono', monospace",
-              fontWeight: 700,
-            }}>STATUT</label>
+            <label style={lbl}>STATUT</label>
             <select
               value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
-                fontSize: 14,
-                fontFamily: "'Syne', sans-serif",
-              }}
+              onChange={e => setFormData({ ...formData, status: e.target.value })}
+              style={inp}
             >
               <option value="upcoming" style={{ background: '#1a0a2e' }}>À venir</option>
               <option value="finished" style={{ background: '#1a0a2e' }}>Terminé</option>
@@ -305,55 +285,25 @@ export default function AdminMatches() {
           {formData.status === 'finished' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
               <div>
-                <label style={{
-                  display: 'block',
-                  fontSize: 11,
-                  color: '#aaa',
-                  marginBottom: 6,
-                  fontFamily: "'DM Mono', monospace",
-                  fontWeight: 700,
-                }}>SCORE DOMICILE</label>
+                <label style={lbl}>SCORE DOMICILE</label>
                 <input
                   type="number"
                   min="0"
-                  value={formData.home_score || ''}
-                  onChange={(e) => setFormData({ ...formData, home_score: parseInt(e.target.value) || null })}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 10,
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    color: '#fff',
-                    fontSize: 14,
-                    fontFamily: "'Syne', sans-serif",
-                  }}
+                  value={formData.home_score}
+                  onChange={e => setFormData({ ...formData, home_score: e.target.value })}
+                  style={inp}
+                  placeholder="84"
                 />
               </div>
               <div>
-                <label style={{
-                  display: 'block',
-                  fontSize: 11,
-                  color: '#aaa',
-                  marginBottom: 6,
-                  fontFamily: "'DM Mono', monospace",
-                  fontWeight: 700,
-                }}>SCORE EXTÉRIEUR</label>
+                <label style={lbl}>SCORE EXTÉRIEUR</label>
                 <input
                   type="number"
                   min="0"
-                  value={formData.away_score || ''}
-                  onChange={(e) => setFormData({ ...formData, away_score: parseInt(e.target.value) || null })}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 10,
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    color: '#fff',
-                    fontSize: 14,
-                    fontFamily: "'Syne', sans-serif",
-                  }}
+                  value={formData.away_score}
+                  onChange={e => setFormData({ ...formData, away_score: e.target.value })}
+                  style={inp}
+                  placeholder="72"
                 />
               </div>
             </div>
@@ -376,52 +326,42 @@ export default function AdminMatches() {
               fontFamily: "'Syne', sans-serif",
             }}
           >
-            {loading ? 'Enregistrement...' : editingMatch ? 'Mettre à jour' : 'Ajouter le match'}
+            {loading ? 'Enregistrement...' : editingId ? '✅ Mettre à jour' : '➕ Ajouter le match'}
           </button>
         </form>
       )}
 
-      {/* Matches list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {matches.map(match => (
           <div
-            key={match.match_id}
+            key={match.id}
             style={{
-              background: 'rgba(255, 255, 255, 0.04)',
+              background: 'rgba(255,255,255,0.04)',
               borderRadius: 16,
               padding: '14px',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255,255,255,0.08)',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div style={{
-                fontSize: 11,
-                color: '#c9a0dc',
-                fontFamily: "'DM Mono', monospace",
-                fontWeight: 700,
-              }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, color: '#c9a0dc', fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>
                 {match.equipe}
-              </div>
-              <div style={{
-                fontSize: 10,
-                color: match.status === 'finished' ? '#10B981' : '#888',
-                fontFamily: "'DM Mono', monospace",
-              }}>
-                {match.status === 'finished' ? 'TERMINÉ' : 'À VENIR'}
-              </div>
+              </span>
+              <span style={{ fontSize: 10, color: match.status === 'finished' ? '#10B981' : '#FFD700', fontFamily: "'DM Mono',monospace" }}>
+                {match.status === 'finished' ? '✅ TERMINÉ' : '⏳ À VENIR'}
+              </span>
             </div>
 
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
               {match.home_team} vs {match.away_team}
             </div>
 
             {match.status === 'finished' && (
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#FFD700', marginBottom: 8 }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#FFD700', marginBottom: 6 }}>
                 {match.home_score} - {match.away_score}
               </div>
             )}
 
-            <div style={{ fontSize: 11, color: '#666', fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: '#555', fontFamily: "'DM Mono',monospace", marginBottom: 12 }}>
               {new Date(match.match_date).toLocaleString('fr-FR')}
             </div>
 
@@ -432,30 +372,30 @@ export default function AdminMatches() {
                   flex: 1,
                   padding: '8px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255, 215, 0, 0.3)',
-                  background: 'rgba(255, 215, 0, 0.1)',
+                  cursor: 'pointer',
+                  border: '1px solid rgba(255,215,0,0.3)',
+                  background: 'rgba(255,215,0,0.1)',
                   color: '#FFD700',
                   fontSize: 12,
                   fontWeight: 700,
-                  cursor: 'pointer',
-                  fontFamily: "'Syne', sans-serif",
+                  fontFamily: "'Syne',sans-serif",
                 }}
               >
                 ✏️ Modifier
               </button>
               <button
-                onClick={() => deleteMatch(match.match_id)}
+                onClick={() => deleteMatch(match.id)}
                 style={{
                   flex: 1,
                   padding: '8px',
                   borderRadius: 10,
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  background: 'rgba(239, 68, 68, 0.1)',
+                  cursor: 'pointer',
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  background: 'rgba(239,68,68,0.1)',
                   color: '#ef4444',
                   fontSize: 12,
                   fontWeight: 700,
-                  cursor: 'pointer',
-                  fontFamily: "'Syne', sans-serif",
+                  fontFamily: "'Syne',sans-serif",
                 }}
               >
                 🗑️ Supprimer
@@ -471,7 +411,6 @@ export default function AdminMatches() {
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div style={{
           position: 'fixed',
@@ -479,16 +418,17 @@ export default function AdminMatches() {
           left: '50%',
           transform: 'translateX(-50%)',
           background: toast.type === 'error'
-            ? 'linear-gradient(135deg, #ef4444, #dc2626)'
-            : 'linear-gradient(135deg, #10B981, #059669)',
+            ? 'linear-gradient(135deg,#ef4444,#dc2626)'
+            : 'linear-gradient(135deg,#10B981,#059669)',
           color: '#fff',
           padding: '12px 24px',
           borderRadius: 20,
           fontWeight: 800,
           fontSize: 13,
-          fontFamily: "'Syne', sans-serif",
+          fontFamily: "'Syne',sans-serif",
           zIndex: 9999,
           boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+          whiteSpace: 'nowrap',
         }}>
           {toast.msg}
         </div>
