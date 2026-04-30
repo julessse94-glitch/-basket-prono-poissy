@@ -18,7 +18,10 @@ export default function Auth() {
         if (error) throw error;
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
+		if (error) throw error;
+		// Connexion automatique après inscription
+		const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+		if (loginError) throw loginError;
       }
     } catch (err) {
       setError(err.message);
