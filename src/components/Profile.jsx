@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 
 const AVATARS = ['🏀', '🔥', '⭐', '⚡', '🦁', '🌙', '💫', '🎯', '👑', '🦅', '🐺', '☘️'];
+const CATEGORIES_JOUEUR = ['U7', 'U9', 'U11', 'U13', 'U15', 'U17', 'U18', 'U20', 'Senior', 'Vétéran'];
+const CATEGORIES_PARENT = ['U7', 'U9', 'U11', 'U13', 'U15', 'U17', 'U18', 'U20', 'Senior'];
 
 function generateCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -19,10 +21,18 @@ const lbl = {
   marginBottom: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 0.5,
 };
 
+function getCategorieLabel(profile) {
+  if (!profile?.role) return '';
+  if (profile.role === 'parent') return `Parent · ${profile.categorie || ''}`;
+  return profile.categorie || '';
+}
+
 function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
   const [section, setSection] = useState('main');
   const [pseudo, setPseudo] = useState(profile.pseudo || '');
   const [avatar, setAvatar] = useState(profile.avatar || '🏀');
+  const [role, setRole] = useState(profile.role || 'joueur');
+  const [categorie, setCategorie] = useState(profile.categorie || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [groupeAction, setGroupeAction] = useState('');
@@ -37,9 +47,11 @@ function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
     setTimeout(() => { setMsg(null); setError(null); }, 3000);
   };
 
+  const categories = role === 'joueur' ? CATEGORIES_JOUEUR : CATEGORIES_PARENT;
+
   const saveProfil = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('profiles').update({ pseudo, avatar }).eq('id', userId).select().single();
+    const { data, error } = await supabase.from('profiles').update({ pseudo, avatar, role, categorie }).eq('id', userId).select().single();
     setLoading(false);
     if (error) showMsg(error.message, true);
     else { onUpdate(data); showMsg('Profil mis à jour ✅'); }
@@ -109,12 +121,12 @@ function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
         {section === 'main' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[
-              { icon: '👤', label: 'Modifier le profil', sub: `${profile.pseudo} · ${profile.avatar}`, action: () => setSection('profil') },
+              { icon: '👤', label: 'Modifier le profil', sub: `${profile.pseudo} · ${getCategorieLabel(profile)}`, action: () => setSection('profil') },
               { icon: '👥', label: 'Mon groupe', sub: profile.groupe_nom || 'Créer ou rejoindre', action: () => setSection('groupe') },
               { icon: '🔑', label: 'Mot de passe', sub: 'Changer ton mot de passe', action: () => setSection('password') },
             ].map((item, i) => (
               <button key={i} onClick={item.action} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 16, background: '#F8F7F4', border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                <div style={{ fontSize: 22, width: 42, height: 42, borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0 }}>{item.icon}</div>
+                <div style={{ fontSize: 22, width: 42, height: 42, borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{item.icon}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1A2E' }}>{item.label}</div>
                   <div style={{ fontSize: 12, color: '#BBB', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.sub}</div>
@@ -137,9 +149,25 @@ function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
                 {AVATARS.map(av => <button key={av} type="button" onClick={() => setAvatar(av)} style={{ padding: '10px', borderRadius: 12, fontSize: 22, cursor: 'pointer', border: avatar === av ? '2px solid #1A1A2E' : '2px solid #F0F0F0', background: avatar === av ? '#F8F7F4' : '#fff' }}>{av}</button>)}
               </div>
             </div>
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 16 }}>
               <label style={lbl}>PSEUDO</label>
               <input type="text" value={pseudo} onChange={e => setPseudo(e.target.value)} maxLength={20} style={inp} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={lbl}>JE SUIS</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[['joueur', '🏀 Joueur'], ['parent', '👨‍👩‍👧 Parent']].map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => { setRole(v); setCategorie(''); }} style={{ flex: 1, padding: '12px', borderRadius: 12, border: `2px solid ${role === v ? '#1A1A2E' : '#F0F0F0'}`, background: role === v ? '#1A1A2E' : '#FAFAFA', color: role === v ? '#FFD700' : '#666', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: "'Outfit', sans-serif" }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={lbl}>{role === 'joueur' ? 'MA CATÉGORIE' : 'CATÉGORIE DE MON ENFANT'}</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {categories.map(cat => (
+                  <button key={cat} type="button" onClick={() => setCategorie(cat)} style={{ padding: '8px 14px', borderRadius: 20, border: `2px solid ${categorie === cat ? '#1A1A2E' : '#F0F0F0'}`, background: categorie === cat ? '#1A1A2E' : '#FAFAFA', color: categorie === cat ? '#FFD700' : '#666', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: "'Outfit', sans-serif" }}>{cat}</button>
+                ))}
+              </div>
             </div>
             <button onClick={saveProfil} disabled={loading} style={{ width: '100%', padding: '14px', borderRadius: 14, border: 'none', background: '#1A1A2E', color: '#FFD700', fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1, fontFamily: "'Outfit', sans-serif" }}>
               {loading ? 'Enregistrement...' : 'Mettre à jour'}
@@ -156,7 +184,7 @@ function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
                   <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E', marginBottom: 12 }}>{profile.groupe_nom}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ fontSize: 20, fontWeight: 900, color: '#1A1A2E', letterSpacing: 4, fontFamily: "'Space Mono', monospace", background: '#fff', padding: '10px 16px', borderRadius: 10, border: '2px solid #F0F0F0', flex: 1, textAlign: 'center' }}>{profile.groupe_code}</div>
-                    <button onClick={() => navigator.clipboard.writeText(`Rejoins-moi sur Hoop Prono ! 🏀\nPronostique les playoffs NBA.\nCode du groupe : ${profile.groupe_code}`)} style={{ padding: '12px 14px', borderRadius: 10, border: 'none', background: '#1A1A2E', color: '#FFD700', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>📤</button>
+                    <button onClick={() => navigator.clipboard.writeText(`Rejoins-moi sur Hoop Prono ! 🏀\nCode du groupe : ${profile.groupe_code}\nhttps://hoop-prono.vercel.app`)} style={{ padding: '12px 14px', borderRadius: 10, border: 'none', background: '#1A1A2E', color: '#FFD700', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>📤</button>
                   </div>
                   <div style={{ fontSize: 11, color: '#BBB', marginTop: 8, textAlign: 'center' }}>Partage ce code à tes amis</div>
                 </div>
@@ -225,34 +253,30 @@ function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
   );
 }
 
-// ── PAGE PROFIL ──
 export default function Profile({ userId, existingProfile, onProfileCreated, onProfileUpdated, showSettings, onCloseSettings, onSignOut }) {
   const [pronos, setPronos] = useState([]);
   const [nbaGames, setNbaGames] = useState({});
   const [loading, setLoading] = useState(true);
   const [pseudo, setPseudo] = useState('');
   const [avatar, setAvatar] = useState('🏀');
+  const [role, setRole] = useState('joueur');
+  const [categorie, setCategorie] = useState('');
   const [groupeStep, setGroupeStep] = useState('choice');
   const [groupeNom, setGroupeNom] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
   const [error, setError] = useState(null);
   const isCreating = !existingProfile;
+  const categories = role === 'joueur' ? CATEGORIES_JOUEUR : CATEGORIES_PARENT;
 
   useEffect(() => {
     if (existingProfile) {
       loadAll();
-      // Écoute les mises à jour des pronostics en temps réel
-      const channel = supabase
-        .channel(`pronos-${existingProfile.id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pronostics', filter: `user_id=eq.${existingProfile.id}` }, () => {
-          loadAll();
-        })
+      const channel = supabase.channel(`pronos-${existingProfile.id}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pronostics', filter: `user_id=eq.${existingProfile.id}` }, () => loadAll())
         .subscribe();
       return () => supabase.removeChannel(channel);
-    } else {
-      setLoading(false);
-    }
+    } else setLoading(false);
   }, [existingProfile?.id]);
 
   const loadAll = async () => {
@@ -261,26 +285,19 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
   };
 
   const loadPronos = async () => {
-    const { data } = await supabase
-      .from('pronostics').select('*')
-      .eq('user_id', existingProfile.id)
-      .order('created_at', { ascending: false });
+    const { data } = await supabase.from('pronostics').select('*').eq('user_id', existingProfile.id).order('created_at', { ascending: false });
     if (data) setPronos(data);
   };
 
   const loadNbaGames = async () => {
     const { data } = await supabase.from('nba_games').select('id, home_name, away_name, game_num, serie_id, status, home_score, away_score, home, away');
-    if (data) {
-      const map = {};
-      data.forEach(g => { map[g.id] = g; });
-      setNbaGames(map);
-    }
+    if (data) { const map = {}; data.forEach(g => { map[g.id] = g; }); setNbaGames(map); }
   };
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    setSaveLoading(true);
-    setError(null);
+    if (!categorie) { setError('Choisis ta catégorie'); return; }
+    setSaveLoading(true); setError(null);
     try {
       let finalGroupeCode = null, finalGroupeNom = null;
       if (groupeStep === 'create' && groupeNom) {
@@ -292,7 +309,7 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
         if (!groupe) throw new Error('Code de groupe invalide');
         finalGroupeCode = groupe.code; finalGroupeNom = groupe.nom;
       }
-      const { data, error } = await supabase.from('profiles').upsert({ id: userId, pseudo, avatar, points: 0, groupe_code: finalGroupeCode, groupe_nom: finalGroupeNom }).select().single();
+      const { data, error } = await supabase.from('profiles').upsert({ id: userId, pseudo, avatar, role, categorie, points: 0, groupe_code: finalGroupeCode, groupe_nom: finalGroupeNom }).select().single();
       if (error) throw error;
       onProfileCreated?.(data);
     } catch (err) { setError(err.message); }
@@ -304,7 +321,6 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
   const pct = submitted.length > 0 ? Math.round((correct.length / submitted.length) * 100) : 0;
   const last5 = submitted.slice(0, 5);
 
-  // ── CRÉATION ──
   if (isCreating) {
     return (
       <div style={{ minHeight: '100vh', background: '#F8F7F4', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, fontFamily: "'Outfit', sans-serif" }}>
@@ -327,6 +343,22 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
                 <label style={lbl}>TON PSEUDO</label>
                 <input type="text" value={pseudo} onChange={e => setPseudo(e.target.value)} required maxLength={20} style={inp} placeholder="Comment veux-tu apparaître ?" />
               </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={lbl}>JE SUIS</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[['joueur', '🏀 Joueur'], ['parent', '👨‍👩‍👧 Parent']].map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => { setRole(v); setCategorie(''); }} style={{ flex: 1, padding: '12px', borderRadius: 12, border: `2px solid ${role === v ? '#1A1A2E' : '#F0F0F0'}`, background: role === v ? '#1A1A2E' : '#FAFAFA', color: role === v ? '#FFD700' : '#666', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: "'Outfit', sans-serif" }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={lbl}>{role === 'joueur' ? 'MA CATÉGORIE' : 'CATÉGORIE DE MON ENFANT'}</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {categories.map(cat => (
+                    <button key={cat} type="button" onClick={() => setCategorie(cat)} style={{ padding: '8px 14px', borderRadius: 20, border: `2px solid ${categorie === cat ? '#1A1A2E' : '#F0F0F0'}`, background: categorie === cat ? '#1A1A2E' : '#FAFAFA', color: categorie === cat ? '#FFD700' : '#666', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: "'Outfit', sans-serif" }}>{cat}</button>
+                  ))}
+                </div>
+              </div>
               <div style={{ marginBottom: 24 }}>
                 <label style={lbl}>GROUPE (optionnel)</label>
                 {groupeStep === 'choice' && (
@@ -343,7 +375,7 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
                 )}
                 {groupeStep === 'join' && (
                   <div>
-                    <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} style={{ ...inp, letterSpacing: 4, fontFamily: "'Space Mono', monospace", fontSize: 20, textAlign: 'center' }} placeholder="CODE" />
+                    <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} maxLength={6} style={{ ...inp, letterSpacing: 4, fontFamily: "'Space Mono', monospace", fontSize: 20, textAlign: 'center' }} placeholder="XXXXXX" />
                     <button type="button" onClick={() => setGroupeStep('choice')} style={{ marginTop: 8, background: 'none', border: 'none', color: '#BBB', fontSize: 12, cursor: 'pointer', fontFamily: "'Outfit', sans-serif" }}>← Retour</button>
                   </div>
                 )}
@@ -359,12 +391,10 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
     );
   }
 
-  // ── PAGE PROFIL ──
   return (
     <div style={{ padding: '0 16px 100px', fontFamily: "'Outfit', sans-serif" }}>
       <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }`}</style>
 
-      {/* Card identité */}
       <div style={{ background: '#1A1A2E', borderRadius: 24, padding: '22px', marginBottom: 14, boxShadow: '0 4px 24px rgba(26,26,46,0.15)', animation: 'slideUp 0.3s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'rgba(255,215,0,0.1)', border: '2px solid rgba(255,215,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0 }}>
@@ -372,11 +402,13 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{existingProfile.pseudo}</div>
-            {existingProfile.groupe_nom ? (
-              <div style={{ fontSize: 11, color: 'rgba(255,215,0,0.5)', fontFamily: "'Space Mono', monospace", marginTop: 4 }}>👥 {existingProfile.groupe_nom} · {existingProfile.groupe_code}</div>
-            ) : (
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: "'Space Mono', monospace", marginTop: 4 }}>Pas de groupe — crées-en un via ⚙️</div>
-            )}
+            <div style={{ fontSize: 11, color: 'rgba(255,215,0,0.5)', fontFamily: "'Space Mono', monospace", marginTop: 3 }}>
+              {getCategorieLabel(existingProfile)}
+            </div>
+            {existingProfile.groupe_nom
+              ? <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: "'Space Mono', monospace", marginTop: 2 }}>👥 {existingProfile.groupe_nom} · {existingProfile.groupe_code}</div>
+              : <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: "'Space Mono', monospace", marginTop: 2 }}>Pas de groupe — crées-en un via ⚙️</div>
+            }
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             <div style={{ fontSize: 9, color: 'rgba(255,215,0,0.4)', fontFamily: "'Space Mono', monospace", marginBottom: 2 }}>TOTAL</div>
@@ -386,7 +418,6 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
         </div>
       </div>
 
-      {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         {[
           { label: 'PRONOS', value: submitted.length, icon: '✏️' },
@@ -401,37 +432,25 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
         ))}
       </div>
 
-      {/* 5 derniers pronos */}
       {submitted.length > 0 ? (
         <div style={{ background: '#fff', borderRadius: 20, padding: '16px 18px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)', animation: 'slideUp 0.3s ease 0.18s both' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#BBB', fontFamily: "'Space Mono', monospace", letterSpacing: 0.5 }}>
-              5 DERNIERS PRONOS
-            </div>
-            <div style={{ fontSize: 10, color: '#CCC', fontFamily: "'Space Mono', monospace" }}>
-              Mis à jour en temps réel
-            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#BBB', fontFamily: "'Space Mono', monospace", letterSpacing: 0.5 }}>5 DERNIERS PRONOS</div>
+            <div style={{ fontSize: 10, color: '#CCC', fontFamily: "'Space Mono', monospace" }}>Temps réel</div>
           </div>
           {last5.map((p, i) => {
             const game = nbaGames[p.nba_serie_id];
-            const serieLabel = game
-              ? `${game.home_name} vs ${game.away_name}`
-              : p.nba_serie_id || 'Match';
+            const serieLabel = game ? `${game.home_name} vs ${game.away_name}` : p.nba_serie_id || 'Match';
             const gameNum = game ? `Game ${game.game_num}` : '';
-            const winnerLabel = game
-              ? (p.vainqueur === 'home' ? game.home_name : game.away_name)
-              : (p.vainqueur === 'home' ? 'Domicile' : 'Extérieur');
+            const winnerLabel = game ? (p.vainqueur === 'home' ? game.home_name : game.away_name) : (p.vainqueur === 'home' ? 'Domicile' : 'Extérieur');
             const isFinished = game?.status === 'finished';
             const icon = !isFinished ? '⏳' : p.points_gagnes > 0 ? '✅' : '❌';
-
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: i < last5.length - 1 ? '1px solid #F8F7F4' : 'none' }}>
                 <div style={{ fontSize: 16, flexShrink: 0 }}>{icon}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1A2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{winnerLabel}</div>
-                  <div style={{ fontSize: 10, color: '#CCC', fontFamily: "'Space Mono', monospace", marginTop: 2 }}>
-                    {serieLabel}{gameNum ? ` · ${gameNum}` : ''}
-                  </div>
+                  <div style={{ fontSize: 10, color: '#CCC', fontFamily: "'Space Mono', monospace", marginTop: 2 }}>{serieLabel}{gameNum ? ` · ${gameNum}` : ''}</div>
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 800, color: p.points_gagnes > 0 ? '#059669' : isFinished ? '#EF4444' : '#BBB', fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
                   {p.points_gagnes > 0 ? `+${p.points_gagnes}` : isFinished ? '0' : '?'} pts
