@@ -19,39 +19,6 @@ const lbl = {
   marginBottom: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 0.5,
 };
 
-// Noms lisibles des séries
-const SERIE_LABELS = {
-  BOS_PHI: 'Celtics vs 76ers',
-  NYK_ATL: 'Knicks vs Hawks',
-  CLE_TOR: 'Cavaliers vs Raptors',
-  DET_ORL: 'Pistons vs Magic',
-  OKC_PHX: 'Thunder vs Suns',
-  SAS_POR: 'Spurs vs Trail Blazers',
-  DEN_MIN: 'Nuggets vs T-Wolves',
-  LAL_HOU: 'Lakers vs Rockets',
-};
-
-function getSerieLabel(nbaSerieId) {
-  if (!nbaSerieId) return 'Match';
-  // Format "g_bos5" → extraire la série
-  if (nbaSerieId.startsWith('g_bos')) return SERIE_LABELS['BOS_PHI'];
-  if (nbaSerieId.startsWith('g_nyk')) return SERIE_LABELS['NYK_ATL'];
-  if (nbaSerieId.startsWith('g_cle')) return SERIE_LABELS['CLE_TOR'];
-  if (nbaSerieId.startsWith('g_det')) return SERIE_LABELS['DET_ORL'];
-  if (nbaSerieId.startsWith('g_okc')) return SERIE_LABELS['OKC_PHX'];
-  if (nbaSerieId.startsWith('g_sas')) return SERIE_LABELS['SAS_POR'];
-  if (nbaSerieId.startsWith('g_den')) return SERIE_LABELS['DEN_MIN'];
-  if (nbaSerieId.startsWith('g_lal')) return SERIE_LABELS['LAL_HOU'];
-  // Déjà un label lisible
-  return SERIE_LABELS[nbaSerieId] || nbaSerieId;
-}
-
-function getGameNum(nbaSerieId) {
-  const match = nbaSerieId?.match(/\d+$/);
-  return match ? `Game ${match[0]}` : '';
-}
-
-// ── SETTINGS MODAL ──
 function SettingsModal({ profile, userId, onClose, onUpdate, onSignOut }) {
   const [section, setSection] = useState('main');
   const [pseudo, setPseudo] = useState(profile.pseudo || '');
@@ -273,18 +240,36 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
   const isCreating = !existingProfile;
 
   useEffect(() => {
-    if (existingProfile) { loadPronos(); loadNbaGames(); }
-    else setLoading(false);
+    if (existingProfile) {
+      loadAll();
+      // Écoute les mises à jour des pronostics en temps réel
+      const channel = supabase
+        .channel(`pronos-${existingProfile.id}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pronostics', filter: `user_id=eq.${existingProfile.id}` }, () => {
+          loadAll();
+        })
+        .subscribe();
+      return () => supabase.removeChannel(channel);
+    } else {
+      setLoading(false);
+    }
   }, [existingProfile?.id]);
 
-  const loadPronos = async () => {
-    const { data } = await supabase.from('pronostics').select('*').eq('user_id', existingProfile.id).order('created_at', { ascending: false });
-    if (data) setPronos(data);
+  const loadAll = async () => {
+    await Promise.all([loadPronos(), loadNbaGames()]);
     setLoading(false);
   };
 
+  const loadPronos = async () => {
+    const { data } = await supabase
+      .from('pronostics').select('*')
+      .eq('user_id', existingProfile.id)
+      .order('created_at', { ascending: false });
+    if (data) setPronos(data);
+  };
+
   const loadNbaGames = async () => {
-    const { data } = await supabase.from('nba_games').select('id, home_name, away_name, game_num, serie_id');
+    const { data } = await supabase.from('nba_games').select('id, home_name, away_name, game_num, serie_id, status, home_score, away_score, home, away');
     if (data) {
       const map = {};
       data.forEach(g => { map[g.id] = g; });
@@ -317,6 +302,7 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
   const submitted = pronos.filter(p => p.submitted);
   const correct = pronos.filter(p => p.points_gagnes > 0);
   const pct = submitted.length > 0 ? Math.round((correct.length / submitted.length) * 100) : 0;
+  const last5 = submitted.slice(0, 5);
 
   // ── CRÉATION ──
   if (isCreating) {
@@ -373,7 +359,7 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
     );
   }
 
-  // ── PAGE PROFIL PRINCIPALE ──
+  // ── PAGE PROFIL ──
   return (
     <div style={{ padding: '0 16px 100px', fontFamily: "'Outfit', sans-serif" }}>
       <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }`}</style>
@@ -387,13 +373,9 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{existingProfile.pseudo}</div>
             {existingProfile.groupe_nom ? (
-              <div style={{ fontSize: 11, color: 'rgba(255,215,0,0.5)', fontFamily: "'Space Mono', monospace", marginTop: 4 }}>
-                👥 {existingProfile.groupe_nom} · {existingProfile.groupe_code}
-              </div>
+              <div style={{ fontSize: 11, color: 'rgba(255,215,0,0.5)', fontFamily: "'Space Mono', monospace", marginTop: 4 }}>👥 {existingProfile.groupe_nom} · {existingProfile.groupe_code}</div>
             ) : (
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: "'Space Mono', monospace", marginTop: 4 }}>
-                Pas de groupe — crées-en un via ⚙️
-              </div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: "'Space Mono', monospace", marginTop: 4 }}>Pas de groupe — crées-en un via ⚙️</div>
             )}
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -419,36 +401,40 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
         ))}
       </div>
 
-      {/* Historique */}
+      {/* 5 derniers pronos */}
       {submitted.length > 0 ? (
         <div style={{ background: '#fff', borderRadius: 20, padding: '16px 18px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)', animation: 'slideUp 0.3s ease 0.18s both' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#BBB', fontFamily: "'Space Mono', monospace", marginBottom: 14, letterSpacing: 0.5 }}>DERNIERS PRONOS</div>
-          {submitted.slice(0, 5).map((p, i, arr) => {
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#BBB', fontFamily: "'Space Mono', monospace", letterSpacing: 0.5 }}>
+              5 DERNIERS PRONOS
+            </div>
+            <div style={{ fontSize: 10, color: '#CCC', fontFamily: "'Space Mono', monospace" }}>
+              Mis à jour en temps réel
+            </div>
+          </div>
+          {last5.map((p, i) => {
             const game = nbaGames[p.nba_serie_id];
             const serieLabel = game
               ? `${game.home_name} vs ${game.away_name}`
-              : getSerieLabel(p.nba_serie_id);
-            const gameNum = game ? `Game ${game.game_num}` : getGameNum(p.nba_serie_id);
+              : p.nba_serie_id || 'Match';
+            const gameNum = game ? `Game ${game.game_num}` : '';
             const winnerLabel = game
               ? (p.vainqueur === 'home' ? game.home_name : game.away_name)
               : (p.vainqueur === 'home' ? 'Domicile' : 'Extérieur');
-            const isPending = p.submitted && p.points_gagnes === 0 && !p.result_known;
+            const isFinished = game?.status === 'finished';
+            const icon = !isFinished ? '⏳' : p.points_gagnes > 0 ? '✅' : '❌';
 
             return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: i < arr.length - 1 ? '1px solid #F8F7F4' : 'none' }}>
-                <div style={{ fontSize: 16 }}>
-                  {p.points_gagnes > 0 ? '✅' : p.points_gagnes === 0 && p.submitted ? '⏳' : '❌'}
-                </div>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: i < last5.length - 1 ? '1px solid #F8F7F4' : 'none' }}>
+                <div style={{ fontSize: 16, flexShrink: 0 }}>{icon}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1A2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {winnerLabel}
-                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1A2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{winnerLabel}</div>
                   <div style={{ fontSize: 10, color: '#CCC', fontFamily: "'Space Mono', monospace", marginTop: 2 }}>
-                    {serieLabel} {gameNum ? `· ${gameNum}` : ''}
+                    {serieLabel}{gameNum ? ` · ${gameNum}` : ''}
                   </div>
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: p.points_gagnes > 0 ? '#059669' : '#CCC', fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
-                  {p.points_gagnes > 0 ? `+${p.points_gagnes}` : '—'} pts
+                <div style={{ fontSize: 13, fontWeight: 800, color: p.points_gagnes > 0 ? '#059669' : isFinished ? '#EF4444' : '#BBB', fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
+                  {p.points_gagnes > 0 ? `+${p.points_gagnes}` : isFinished ? '0' : '?'} pts
                 </div>
               </div>
             );
@@ -462,9 +448,7 @@ export default function Profile({ userId, existingProfile, onProfileCreated, onP
         </div>
       )}
 
-      {showSettings && (
-        <SettingsModal profile={existingProfile} userId={userId} onClose={onCloseSettings} onUpdate={data => onProfileUpdated?.(data)} onSignOut={onSignOut} />
-      )}
+      {showSettings && <SettingsModal profile={existingProfile} userId={userId} onClose={onCloseSettings} onUpdate={data => onProfileUpdated?.(data)} onSignOut={onSignOut} />}
     </div>
   );
 }

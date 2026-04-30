@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabase';
 
-// Vrais logos NBA via CDN officiel
 const NBA_LOGOS = {
   BOS: 'https://cdn.nba.com/logos/nba/1610612738/global/L/logo.svg',
   PHI: 'https://cdn.nba.com/logos/nba/1610612755/global/L/logo.svg',
@@ -22,29 +21,22 @@ const NBA_LOGOS = {
 };
 
 const SERIES_ORDER = ['BOS_PHI', 'NYK_ATL', 'CLE_TOR', 'DET_ORL', 'OKC_PHX', 'SAS_POR', 'DEN_MIN', 'LAL_HOU'];
-const SERIES_CONF = { BOS_PHI: 'EST', NYK_ATL: 'EST', CLE_TOR: 'EST', DET_ORL: 'EST', OKC_PHX: 'OUEST', SAS_POR: 'OUEST', DEN_MIN: 'OUEST', LAL_HOU: 'OUEST' };
-const ELIMINATED = ['OKC_PHX', 'SAS_POR'];
+const SERIES_CONF = {
+  BOS_PHI: 'EST', NYK_ATL: 'EST', CLE_TOR: 'EST', DET_ORL: 'EST',
+  OKC_PHX: 'OUEST', SAS_POR: 'OUEST', DEN_MIN: 'OUEST', LAL_HOU: 'OUEST',
+};
 
 function TeamLogo({ abbr, size = 52 }) {
-  const [error, setError] = useState(false);
+  const [err, setErr] = useState(false);
   const FALLBACK = { BOS:'☘️',PHI:'🔔',NYK:'🗽',ATL:'🦅',CLE:'⚔️',TOR:'🦕',DET:'⚙️',ORL:'✨',OKC:'⚡',PHX:'☀️',SAS:'🤠',POR:'🌲',DEN:'⛰️',MIN:'🐺',LAL:'💜',HOU:'🚀' };
-  if (error || !NBA_LOGOS[abbr]) {
-    return <div style={{ fontSize: size * 0.55, width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{FALLBACK[abbr] || '🏀'}</div>;
-  }
-  return (
-    <img
-      src={NBA_LOGOS[abbr]}
-      alt={abbr}
-      width={size} height={size}
-      onError={() => setError(true)}
-      style={{ objectFit: 'contain', display: 'block' }}
-    />
-  );
+  if (err || !NBA_LOGOS[abbr]) return <div style={{ fontSize: size * 0.55, width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{FALLBACK[abbr] || '🏀'}</div>;
+  return <img src={NBA_LOGOS[abbr]} alt={abbr} width={size} height={size} onError={() => setErr(true)} style={{ objectFit: 'contain', display: 'block' }} />;
 }
 
 export default function Matches({ profile }) {
   const [games, setGames] = useState([]);
   const [pronos, setPronos] = useState({});
+  const [statusFilter, setStatusFilter] = useState('upcoming'); // 'upcoming' | 'finished'
   const [confFilter, setConfFilter] = useState('all');
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -92,16 +84,6 @@ export default function Matches({ profile }) {
       vainqueur: prono.vainqueur, submitted: true,
     }, { onConflict: 'user_id,nba_serie_id' });
     if (error) { showToast('Erreur : ' + error.message, 'error'); return; }
-    if (game?.status === 'finished') {
-      const actualWinner = game.home_score > game.away_score ? 'home' : 'away';
-      const pts = prono.vainqueur === actualWinner ? 100 : 0;
-      await supabase.from('pronostics').update({ points_gagnes: pts }).eq('user_id', profile.id).eq('nba_serie_id', gameId);
-      if (pts > 0) {
-        const { data: all } = await supabase.from('pronostics').select('points_gagnes').eq('user_id', profile.id);
-        const total = all?.reduce((s, p) => s + (p.points_gagnes || 0), 0) || 0;
-        await supabase.from('profiles').update({ points: total }).eq('id', profile.id);
-      }
-    }
     showToast('Prono validé ! 🎯');
     loadAll();
   };
@@ -118,28 +100,41 @@ export default function Matches({ profile }) {
     bySerieId[g.serie_id].push(g);
   });
 
-  const series = SERIES_ORDER
-    .filter(sid => confFilter === 'all' || SERIES_CONF[sid] === confFilter)
-    .map(sid => {
-      const serieGames = (bySerieId[sid] || []).sort((a, b) => a.game_num - b.game_num);
-      const finished = serieGames.filter(g => g.status === 'finished');
-      const upcoming = serieGames.filter(g => g.status === 'upcoming' || g.status === 'scheduled');
-      const live = serieGames.find(g => g.status === 'inprogress');
-      const lastFinished = finished[finished.length - 1] || null;
-      const nextGame = live || upcoming[0] || null;
-      const isEliminated = ELIMINATED.includes(sid);
-      const record = lastFinished?.serie_record || '';
-      return { sid, conf: SERIES_CONF[sid], serieGames, lastFinished, nextGame, live: !!live, isEliminated, record };
+  // Pour chaque série, trouver le prochain match (upcoming) et le dernier terminé
+  const seriesData = SERIES_ORDER.map(sid => {
+    const serieGames = (bySerieId[sid] || []).sort((a, b) => a.game_num - b.game_num);
+    const finished = serieGames.filter(g => g.status === 'finished');
+    const upcoming = serieGames.filter(g => g.status === 'upcoming' || g.status === 'scheduled');
+    const live = serieGames.find(g => g.status === 'inprogress');
+    const lastFinished = finished[finished.length - 1] || null;
+    const nextGame = live || upcoming[0] || null;
+    const isEliminated = finished.length > 0 && !nextGame && !live;
+    const record = lastFinished?.serie_record || '';
+    const conf = SERIES_CONF[sid];
+    return { sid, conf, serieGames, lastFinished, nextGame, live: !!live, isEliminated, record, nextDate: nextGame?.game_date || null };
+  });
+
+  // Filtrer et trier
+  const filteredSeries = seriesData
+    .filter(s => confFilter === 'all' || s.conf === confFilter)
+    .filter(s => {
+      if (statusFilter === 'upcoming') return !s.isEliminated;
+      if (statusFilter === 'finished') return s.isEliminated;
+      return true;
+    })
+    // Trier par date du prochain match (les plus proches en premier)
+    .sort((a, b) => {
+      if (!a.nextDate && !b.nextDate) return 0;
+      if (!a.nextDate) return 1;
+      if (!b.nextDate) return -1;
+      return new Date(a.nextDate) - new Date(b.nextDate);
     });
 
-  const totalDispo = series.filter(s => !s.isEliminated).length;
+  const upcomingCount = seriesData.filter(s => !s.isEliminated).length;
+  const finishedCount = seriesData.filter(s => s.isEliminated).length;
   const totalPronos = Object.keys(pronos).filter(k => pronos[k]?.submitted).length;
 
-  if (loading) return (
-    <div style={{ padding: '40px', textAlign: 'center', color: '#BBB', fontFamily: "'Outfit', sans-serif" }}>
-      Chargement...
-    </div>
-  );
+  if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: '#BBB', fontFamily: "'Outfit', sans-serif" }}>Chargement...</div>;
 
   return (
     <div style={{ padding: '0 16px 100px', fontFamily: "'Outfit', sans-serif" }}>
@@ -149,28 +144,49 @@ export default function Matches({ profile }) {
       `}</style>
 
       {/* Banner */}
-      <div style={{ background: '#1A1A2E', borderRadius: 20, padding: '16px 20px', marginBottom: 18, boxShadow: '0 4px 24px rgba(26,26,46,0.12)' }}>
+      <div style={{ background: '#1A1A2E', borderRadius: 20, padding: '16px 20px', marginBottom: 16, boxShadow: '0 4px 24px rgba(26,26,46,0.12)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontSize: 10, color: 'rgba(255,215,0,0.4)', fontFamily: "'Space Mono', monospace", letterSpacing: 1, marginBottom: 4 }}>NBA · PLAYOFFS 2026 · 1ER TOUR</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Prochain match de chaque série</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', marginTop: 3, fontFamily: "'Space Mono', monospace" }}>
-              {totalPronos}/{totalDispo} pronos · 100 pts par bon prono
+              {totalPronos} prono{totalPronos > 1 ? 's' : ''} posé{totalPronos > 1 ? 's' : ''} · 100 pts par bon prono
             </div>
           </div>
           <div style={{ fontSize: 30 }}>🏆</div>
         </div>
-        <div style={{ marginTop: 12, height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
-          <div style={{ height: '100%', borderRadius: 2, background: 'linear-gradient(90deg,#FFD700,#FFA500)', width: `${Math.min((totalPronos / totalDispo) * 100, 100)}%`, transition: 'width .6s ease' }} />
-        </div>
       </div>
 
-      {/* Conf filter */}
+      {/* Onglets À venir / Terminés */}
+      <div style={{ display: 'flex', background: '#EBEBEB', borderRadius: 14, padding: 4, marginBottom: 14, gap: 0 }}>
+        <button onClick={() => setStatusFilter('upcoming')} style={{
+          flex: 1, padding: '9px', borderRadius: 11, border: 'none', cursor: 'pointer',
+          fontSize: 12, fontWeight: 700,
+          background: statusFilter === 'upcoming' ? '#fff' : 'transparent',
+          color: statusFilter === 'upcoming' ? '#1A1A2E' : '#AAA',
+          boxShadow: statusFilter === 'upcoming' ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+          transition: 'all 0.2s',
+        }}>
+          ⏳ En cours ({upcomingCount})
+        </button>
+        <button onClick={() => setStatusFilter('finished')} style={{
+          flex: 1, padding: '9px', borderRadius: 11, border: 'none', cursor: 'pointer',
+          fontSize: 12, fontWeight: 700,
+          background: statusFilter === 'finished' ? '#fff' : 'transparent',
+          color: statusFilter === 'finished' ? '#1A1A2E' : '#AAA',
+          boxShadow: statusFilter === 'finished' ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+          transition: 'all 0.2s',
+        }}>
+          ✅ Terminées ({finishedCount})
+        </button>
+      </div>
+
+      {/* Filtre conférence */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         {[['all', 'Toutes'], ['EST', '🏀 Est'], ['OUEST', '⚡ Ouest']].map(([id, label]) => (
           <button key={id} onClick={() => setConfFilter(id)} style={{
-            flex: 1, padding: '9px', borderRadius: 14, border: 'none', cursor: 'pointer',
-            fontSize: 12, fontWeight: 700,
+            flex: 1, padding: '8px', borderRadius: 12, border: 'none', cursor: 'pointer',
+            fontSize: 11, fontWeight: 700,
             background: confFilter === id ? '#1A1A2E' : '#fff',
             color: confFilter === id ? '#FFD700' : '#999',
             boxShadow: confFilter === id ? '0 2px 10px rgba(26,26,46,0.2)' : '0 1px 4px rgba(0,0,0,0.05)',
@@ -179,19 +195,23 @@ export default function Matches({ profile }) {
         ))}
       </div>
 
-      {/* Series */}
+      {filteredSeries.length === 0 && (
+        <div style={{ padding: '40px 20px', textAlign: 'center', background: '#fff', borderRadius: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🏆</div>
+          <div style={{ fontSize: 15, color: '#BBB' }}>Aucune série dans cette catégorie</div>
+        </div>
+      )}
+
+      {/* Séries */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {series.map(({ sid, conf, lastFinished, nextGame, live, isEliminated, record }, si) => {
+        {filteredSeries.map(({ sid, conf, lastFinished, nextGame, live, isEliminated, record }, si) => {
           const activeGameId = nextGame?.id;
           const prono = pronos[activeGameId];
           const isSubmitted = prono?.submitted;
-          const lastWinner = lastFinished
-            ? (lastFinished.home_score > lastFinished.away_score ? lastFinished.home : lastFinished.away)
-            : null;
+          const lastWinner = lastFinished ? (lastFinished.home_score > lastFinished.away_score ? lastFinished.home : lastFinished.away) : null;
           const lastProno = lastFinished ? pronos[lastFinished.id] : null;
           const lastPronoCorrect = lastProno?.submitted && lastWinner && lastProno.vainqueur === lastWinner;
           const lastPronoWrong = lastProno?.submitted && lastWinner && lastProno.vainqueur !== lastWinner;
-
           const nextHome = nextGame?.home;
           const nextAway = nextGame?.away;
 
@@ -199,28 +219,33 @@ export default function Matches({ profile }) {
             <div key={sid} style={{
               background: '#fff', borderRadius: 22, overflow: 'hidden',
               boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-              opacity: isEliminated ? 0.55 : 1,
               animation: `slideUp 0.35s ease ${si * 0.05}s both`,
             }}>
               {/* Header série */}
               <div style={{ padding: '11px 16px', background: isEliminated ? '#F8F7F4' : '#FAFAFA', borderBottom: '1px solid #F0F0F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: conf === 'EST' ? '#3B82F6' : '#F97316', background: conf === 'EST' ? '#EFF6FF' : '#FFF7ED', padding: '3px 8px', borderRadius: 6, fontFamily: "'Space Mono', monospace" }}>{conf}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <TeamLogo abbr={lastFinished?.home || nextGame?.home} size={20} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1A2E' }}>vs</span>
-                    <TeamLogo abbr={lastFinished?.away || nextGame?.away} size={20} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <TeamLogo abbr={lastFinished?.home || nextGame?.home} size={18} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#CCC' }}>vs</span>
+                    <TeamLogo abbr={lastFinished?.away || nextGame?.away} size={18} />
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1A2E' }}>
+                    {(nextGame?.home_name || lastFinished?.home_name || '').split(' ').pop()} vs {(nextGame?.away_name || lastFinished?.away_name || '').split(' ').pop()}
                   </div>
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: isEliminated ? '#059669' : '#888', fontFamily: "'Space Mono', monospace" }}>
-                  {record}
-                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: isEliminated ? '#059669' : '#999', fontFamily: "'Space Mono', monospace" }}>{record}</div>
               </div>
 
               {/* Éliminé */}
               {isEliminated && (
-                <div style={{ padding: '14px', textAlign: 'center', color: '#059669', fontSize: 13, fontWeight: 700 }}>
-                  Série terminée ✅
+                <div style={{ padding: '14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: '#059669', fontWeight: 700, marginBottom: 6 }}>Série terminée ✅</div>
+                  {lastFinished && (
+                    <div style={{ fontSize: 12, color: '#BBB' }}>
+                      Dernier match — {lastFinished.home_name} {lastFinished.home_score} - {lastFinished.away_score} {lastFinished.away_name}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -232,23 +257,19 @@ export default function Matches({ profile }) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <TeamLogo abbr={lastFinished.home} size={40} />
+                      <TeamLogo abbr={lastFinished.home} size={38} />
                       <div style={{ fontSize: 10, fontWeight: 600, color: '#999', marginTop: 4 }}>{lastFinished.home}</div>
-                      <div style={{ fontSize: 28, fontWeight: 900, marginTop: 4, color: lastWinner === lastFinished.home ? '#059669' : '#CCC' }}>
-                        {lastFinished.home_score}
-                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 900, marginTop: 4, color: lastWinner === lastFinished.home ? '#059669' : '#CCC' }}>{lastFinished.home_score}</div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                       <div style={{ fontSize: 10, color: '#E0E0E0', fontFamily: "'Space Mono', monospace" }}>—</div>
-                      {lastPronoCorrect && <div style={{ fontSize: 20 }}>✅</div>}
-                      {lastPronoWrong && <div style={{ fontSize: 20 }}>❌</div>}
+                      {lastPronoCorrect && <div style={{ fontSize: 18 }}>✅</div>}
+                      {lastPronoWrong && <div style={{ fontSize: 18 }}>❌</div>}
                     </div>
                     <div style={{ flex: 1, textAlign: 'center' }}>
-                      <TeamLogo abbr={lastFinished.away} size={40} />
+                      <TeamLogo abbr={lastFinished.away} size={38} />
                       <div style={{ fontSize: 10, fontWeight: 600, color: '#999', marginTop: 4 }}>{lastFinished.away}</div>
-                      <div style={{ fontSize: 28, fontWeight: 900, marginTop: 4, color: lastWinner === lastFinished.away ? '#059669' : '#CCC' }}>
-                        {lastFinished.away_score}
-                      </div>
+                      <div style={{ fontSize: 26, fontWeight: 900, marginTop: 4, color: lastWinner === lastFinished.away ? '#059669' : '#CCC' }}>{lastFinished.away_score}</div>
                     </div>
                   </div>
                   {lastPronoCorrect && <div style={{ marginTop: 8, textAlign: 'center', fontSize: 11, color: '#059669', fontWeight: 700 }}>Ton prono était bon ! +100 pts 🎉</div>}
@@ -268,7 +289,6 @@ export default function Matches({ profile }) {
                     </div>
                   </div>
 
-                  {/* Probas */}
                   {nextGame.win_prob_home && !live && !isSubmitted && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden' }}>
@@ -282,7 +302,6 @@ export default function Matches({ profile }) {
                     </div>
                   )}
 
-                  {/* Boutons équipes */}
                   <div style={{ display: 'flex', gap: 8 }}>
                     {['home', 'away'].map(side => {
                       const abbr = side === 'home' ? nextHome : nextAway;
@@ -301,17 +320,13 @@ export default function Matches({ profile }) {
                           }}
                         >
                           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-                            <TeamLogo abbr={abbr} size={48} />
+                            <TeamLogo abbr={abbr} size={46} />
                           </div>
-                          <div style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.3, color: picked ? '#FFD700' : '#1A1A2E' }}>
-                            {name}
-                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.3, color: picked ? '#FFD700' : '#1A1A2E' }}>{name}</div>
                           <div style={{ fontSize: 9, color: picked ? 'rgba(255,215,0,0.5)' : '#CCC', marginTop: 3, fontFamily: "'Space Mono', monospace" }}>
                             {side === 'home' ? 'DOM' : 'EXT'}
                           </div>
-                          {picked && !live && (
-                            <div style={{ fontSize: 9, color: '#FFD700', marginTop: 4, fontFamily: "'Space Mono', monospace" }}>✓ MON PRONO</div>
-                          )}
+                          {picked && !live && <div style={{ fontSize: 9, color: '#FFD700', marginTop: 4, fontFamily: "'Space Mono', monospace" }}>✓ MON PRONO</div>}
                         </button>
                       );
                     })}
@@ -330,7 +345,7 @@ export default function Matches({ profile }) {
               )}
 
               {!isEliminated && !nextGame && (
-                <div style={{ padding: '16px', textAlign: 'center', color: '#CCC', fontSize: 13 }}>
+                <div style={{ padding: '14px', textAlign: 'center', color: '#CCC', fontSize: 13 }}>
                   Prochain match bientôt annoncé...
                 </div>
               )}
