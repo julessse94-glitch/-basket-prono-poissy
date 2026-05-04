@@ -48,13 +48,13 @@ export default function App() {
 
   if (loading) return (
     <div style={{
-      minHeight: '100vh', background: '#F8F7F4',
+      minHeight: '100vh', background: '#0A0A0A',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       fontFamily: "'Outfit', sans-serif",
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>🏀</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: '#BBB' }}>Chargement...</div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: '#555' }}>Chargement...</div>
       </div>
     </div>
   );
@@ -63,7 +63,7 @@ export default function App() {
   if (!profile) return <Profile userId={session.user.id} onProfileCreated={setProfile} />;
 
   const TABS = [
-    { id: 'matches', icon: '🏀', label: 'Matchs' },
+    { id: 'matches', icon: '🏀', label: 'NBA' },
     { id: 'classement', icon: '🏆', label: 'Classement' },
     { id: 'profil', icon: '👤', label: 'Profil' },
   ];
@@ -71,9 +71,9 @@ export default function App() {
   return (
     <div style={{
       fontFamily: "'Outfit', sans-serif",
-      background: '#F8F7F4',
+      background: '#0D0D0D',
       minHeight: '100vh',
-      color: '#1A1A2E',
+      color: '#fff',
       maxWidth: 480,
       margin: '0 auto',
       position: 'relative',
@@ -86,52 +86,60 @@ export default function App() {
         @keyframes slideUp { from { opacity: 0; transform: translateY(16px) } to { opacity: 1; transform: translateY(0) } }
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
+        @keyframes glow { 0%,100% { box-shadow: 0 0 20px rgba(183,148,244,0.3) } 50% { box-shadow: 0 0 40px rgba(183,148,244,0.6) } }
       `}</style>
 
       {/* Header */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 100,
-        background: 'rgba(248,247,244,0.96)',
+        background: 'rgba(10,10,10,0.95)',
         backdropFilter: 'blur(20px)',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        padding: '14px 20px 12px',
+        borderBottom: '1px solid rgba(183,148,244,0.1)',
+        padding: '12px 20px 10px',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Mini logo */}
             <div style={{
-              fontSize: 10, letterSpacing: 2, color: '#CCC',
-              fontFamily: "'Space Mono', monospace", fontWeight: 700, marginBottom: 2,
-            }}>HOOP PRONO</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1A2E', lineHeight: 1.2 }}>
-              {activeTab === 'matches' && 'NBA Playoffs 🏀'}
-              {activeTab === 'classement' && 'Classement 🏆'}
-              {activeTab === 'profil' && 'Mon Profil'}
+              width: 36, height: 36, borderRadius: '50%',
+              background: '#141414',
+              border: '1px solid rgba(183,148,244,0.3)',
+              overflow: 'hidden',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <img src="/logo-cslr.png" alt="CSLR" style={{ width: '85%', height: '85%', objectFit: 'contain' }}
+                onError={e => { e.target.style.display='none'; }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 9, letterSpacing: 2, color: '#B794F4', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+                HOOP PRONO · CSLR
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', lineHeight: 1.2, marginTop: 1 }}>
+                {activeTab === 'matches' && 'NBA Playoffs 🏀'}
+                {activeTab === 'classement' && 'Classement 🏆'}
+                {activeTab === 'profil' && 'Mon Profil'}
+              </div>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Roue paramètres — uniquement sur l'onglet profil */}
             {activeTab === 'profil' && (
-              <button
-                onClick={() => setShowSettings(true)}
-                style={{
-                  width: 40, height: 40, borderRadius: '50%',
-                  background: '#fff', border: '1px solid #F0F0F0',
-                  cursor: 'pointer', fontSize: 18,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-                  transition: 'all 0.2s',
-                }}
-              >⚙️</button>
+              <button onClick={() => setShowSettings(true)} style={{
+                width: 38, height: 38, borderRadius: '50%',
+                background: '#1A1A1A', border: '1px solid rgba(183,148,244,0.2)',
+                cursor: 'pointer', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>⚙️</button>
             )}
-
-            {/* Compteur de points */}
             <div style={{
-              background: '#1A1A2E', borderRadius: 16, padding: '8px 16px',
+              background: 'linear-gradient(135deg, #B794F4, #9B6FD4)',
+              borderRadius: 14, padding: '6px 14px',
               display: 'flex', flexDirection: 'column', alignItems: 'center',
+              boxShadow: '0 4px 16px rgba(183,148,244,0.3)',
             }}>
-              <div style={{ fontSize: 9, color: 'rgba(255,215,0,0.5)', fontFamily: "'Space Mono', monospace", fontWeight: 700, letterSpacing: 1 }}>PTS</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: '#FFD700', lineHeight: 1 }}>{profile.points || 0}</div>
+              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.6)', fontFamily: "'Space Mono', monospace", fontWeight: 700, letterSpacing: 1 }}>PTS</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{profile.points || 0}</div>
             </div>
           </div>
         </div>
@@ -157,9 +165,9 @@ export default function App() {
       <nav style={{
         position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)',
         width: '100%', maxWidth: 480,
-        background: 'rgba(255,255,255,0.97)',
+        background: 'rgba(10,10,10,0.97)',
         backdropFilter: 'blur(24px)',
-        borderTop: '1px solid rgba(0,0,0,0.06)',
+        borderTop: '1px solid rgba(183,148,244,0.15)',
         display: 'flex', justifyContent: 'space-around',
         padding: '10px 0 24px', zIndex: 200,
       }}>
@@ -172,15 +180,16 @@ export default function App() {
               padding: '4px 20px', transition: 'all 0.2s',
             }}>
               <div style={{
-                width: 44, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 46, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 borderRadius: 10, fontSize: 20,
-                background: active ? '#1A1A2E' : 'transparent',
+                background: active ? 'linear-gradient(135deg, #B794F4, #9B6FD4)' : 'transparent',
+                boxShadow: active ? '0 4px 16px rgba(183,148,244,0.4)' : 'none',
                 transition: 'all 0.2s',
               }}>{t.icon}</div>
               <span style={{
                 fontSize: 9, fontWeight: active ? 700 : 500,
                 fontFamily: "'Space Mono', monospace",
-                color: active ? '#1A1A2E' : '#CCC',
+                color: active ? '#B794F4' : '#444',
                 letterSpacing: 0.5,
               }}>{t.label.toUpperCase()}</span>
             </button>
